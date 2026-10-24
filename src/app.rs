@@ -6,10 +6,10 @@ use crate::config::{Config, History};
 use crate::font::Font;
 use crate::selection::{Element, ElementList};
 use image::{ImageBuffer, RgbaImage};
-use log::{debug, error};
+use log::{debug, error, info};
 use nix::{
     sys::wait::{WaitPidFlag, WaitStatus, waitpid},
-    unistd::{ForkResult, fork},
+    unistd::{ForkResult, fork, setsid},
 };
 use notify_rust::Notification;
 
@@ -237,47 +237,32 @@ impl App {
 }
 
 fn execute(elem: &Element, history: Option<History>) {
-    match unsafe { fork() } {
-        Ok(ForkResult::Parent { child }) => {
-            // We can't make that to long, since for some reason, even if this would be after a fork and the main programm exits,
-            // wayland keeps the window alive
-            std::thread::sleep(Duration::new(0, 100_000_000));
-            match waitpid(child, Some(WaitPidFlag::WNOHANG)) {
-                Ok(WaitStatus::StillAlive | WaitStatus::Exited(_, 0)) => {
-                    if let Some(mut history) = history {
-                        history.inc(elem);
-                        match history.save() {
-                            Ok(()) => {}
-                            Err(e) => {
-                                error!("{e}");
-                            }
-                        };
-                    }
+match unsafe {fork()} {
+    Ok(ForkResult::Child) => {
+        if let Some(mut history) = history {
+            history.inc(elem);
+            match history.save() {
+                Ok(()) => {}
+                Err(e) => {
+                    error!("{e}");
                 }
-                Ok(_) => {
-                    /* Every non 0 statuscode holds no information since it's
-                    origin can be the started application or a file not found error.
-                    In either case the error has already been logged and does not
-                    need to be handled here. */
-                }
-                Err(err) => error!("{err}"),
-            }
+            };
         }
 
-        Ok(ForkResult::Child) => {
-            let err = exec::Command::new("sh").args(&["-c", &elem.value]).exec();
-
-            // Won't be executed when exec was successful
-            error!("{err}");
-
-            Notification::new()
-                .summary("Kickoff")
-                .body(&format!("{err}"))
-                .timeout(5000)
-                .show()
-                .unwrap();
-            process::exit(2);
+        // Detach from parent's session
+        if let Err(e) = setsid() {
+            error!("Failed to detach: {e}");
+            process::exit(1);
         }
-        Err(e) => error!("{e}"),
+
+        let err = exec::Command::new("sh").args(&["-c", &elem.value]).exec();
+
+        error!("exec failed: {err}");
+        process::exit(1);
     }
+    Ok(ForkResult::Parent { child: _ }) => {
+        info!("App launched");
+    }
+    Err(e) => error!("fork failed: {e}"),
+}
 }
