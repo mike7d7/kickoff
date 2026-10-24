@@ -1,4 +1,4 @@
-use std::time::{Duration, Instant};
+use std::time::Instant;
 use std::{cmp, process};
 
 use crate::Args;
@@ -8,10 +8,8 @@ use crate::selection::{Element, ElementList};
 use image::{ImageBuffer, RgbaImage};
 use log::{debug, error, info};
 use nix::{
-    sys::wait::{WaitPidFlag, WaitStatus, waitpid},
     unistd::{ForkResult, fork, setsid},
 };
-use notify_rust::Notification;
 
 pub struct App {
     pub config: Config,
